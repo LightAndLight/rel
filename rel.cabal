@@ -20,7 +20,7 @@ executable example
   main-is:             Example.hs
   build-depends:       base >=4.9 && <5, rel
   hs-source-dirs:      example
-  ghc-options:         -Wincomplete-patterns -Wunused-imports -Werr
+  ghc-options:         -Wincomplete-patterns -Wunused-imports -Werror
   default-language:    Haskell2010
 
 library
@@ -31,6 +31,6 @@ library
   -- other-extensions:
   build-depends:       base >=4.9 && <5
   hs-source-dirs:      src
-  ghc-options:         -Wincomplete-patterns -Wunused-imports -Werr
+  ghc-options:         -Wincomplete-patterns -Wunused-imports -Werror
   default-extensions:  TypeFamilies, GADTs
   default-language:    Haskell2010

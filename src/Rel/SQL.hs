@@ -4,23 +4,62 @@ module Rel.SQL where
 import Data.List (intercalate)
 import Rel
 
+data Expr
+  = E_LT Expr Expr
+  | E_EQ Expr Expr
+  | E_AND Expr Expr
+  | E_OR Expr Expr
+  | E_NOT Expr
+  | E_PRJ String
+  | E_INT Int
+  | E_STRING String
+  | E_UNSAFE String
+  deriving (Eq, Show)
+
+data Target
+  = All
+  | Attr String
+  deriving (Eq, Show)
+
 data SQL
+  = SELECT
+  { _targets :: [Target]
+  , _from :: [Either String SQL]
+  , _where :: Maybe Expr
+  }
+  | UNION SQL SQL
+  | EXCEPT SQL SQL
+  deriving (Eq, Show)
+
 type instance Equal SQL = Vacuous
 type instance Order SQL = Vacuous
 type instance Scheme SQL a = ProjSQL a
 type instance Value SQL a = ValueSQL a
 
+data SQLType b where
+  SQLString :: Int -> SQLType String
+  SQLInt :: SQLType Int
+
+data Constrained f b where
+  Nullable :: f a -> Constrained f (Maybe a)
+  NotNull :: f a -> Constrained f a
+
 class ValueSQL a where
   type TypeOf a
-  toSQL :: a -> String
+  toSQL :: a -> Expr
   getSQLType :: a -> SQLType (TypeOf a)
+
+instance ValueSQL Int where
+  type TypeOf Int = Int
+  toSQL = E_INT
+  getSQLType _ = SQLInt
 
 renderSQLType :: SQLType b -> String
 renderSQLType (SQLString n) = "varchar(" ++ show n ++ ")"
 renderSQLType SQLInt = "int"
 
 renderConstrained :: Constrained SQLType b -> String
-renderConstrained (Pass a) = renderSQLType a
+renderConstrained (Nullable a) = renderSQLType a
 renderConstrained (NotNull a) = renderSQLType a ++ " not null"
 
 class ProjSQL a where
@@ -40,26 +79,40 @@ sqlSchema d =
        (enumAttrs (attrName @d))
        (enumAttrs (renderConstrained . sqlType @d))) ++ ")"
 
-renderProp :: ProjSQL a => Prop SQL a Bool -> String
-renderProp = go
+compileProp :: ProjSQL a => Prop SQL a Bool -> Expr
+compileProp = go
   where
-    go :: ProjSQL a => Prop SQL a b -> String
-    go (And a b) = go a ++ " AND " ++ go b
-    go (Or a b) = go a ++ " OR " ++ go b
-    go (Not a) = "NOT " ++ go a
-    go (Equals a b) = go a ++ " = " ++ go b
-    go (Lt a b) = go a ++ " < " ++ go b
-    go (Prj f) = attrName f
+    go :: ProjSQL a => Prop SQL a b -> Expr
+    go (a :&& b) = E_AND (go a) (go b)
+    go (a :|| b) = E_OR (go a) (go b)
+    go (Not a) = E_NOT (go a)
+    go (a :== b) = E_EQ (go a) (go b)
+    go (Lt a b) = E_LT (go a) (go b)
+    go (Prj f) = E_PRJ (attrName f)
+    go (Val a) = toSQL a
 
-renderRel :: (ProjSQL b, TableSQL a) => Rel SQL a b -> String
-renderRel (Union a b) =
-  "SELECT * FROM (" ++ renderRel a ++ ") UNION SELECT * FROM (" ++ renderRel b ++ ")"
-renderRel (Difference a b) =
-  "SELECT * FROM (" ++ renderRel a ++ ") EXCEPT SELECT * FROM (" ++ renderRel b ++ ")"
-renderRel (Product a b) =
-  "SELECT (*, *) FROM (" ++ renderRel a ++ ", " ++ renderRel b ++ ")"
-renderRel (Project r f) =
-  "SELECT " ++ attrName f ++ " FROM (" ++ renderRel r ++ ")"
-renderRel (Select r p) =
-  "SELECT * FROM (" ++ renderRel r ++ ") WHERE (" ++ renderProp p ++ ")"
-renderRel (Rel t) = "SELECT * FROM " ++ tableName t
+compile :: (TableSQL a) => Rel SQL a b -> SQL
+compile (Union a b) =
+  SELECT [All] [Right $ compile a] Nothing `UNION`
+  SELECT [All] [Right $ compile b] Nothing
+compile (Difference a b) =
+  SELECT [All] [Right $ compile a] Nothing `EXCEPT`
+  SELECT [All] [Right $ compile b] Nothing
+compile (Product a b) =
+  SELECT [All, All] [Right $ compile a, Right $ compile b] Nothing
+compile (Project r f) =
+  SELECT [Attr (attrName f)] [Right $ compile r] Nothing
+compile (Select r p) =
+  SELECT [All] [Right $ compile r] $ Just (compileProp p)
+compile (Rel t) =
+  SELECT [All] [Left $ tableName t] Nothing
+
+optimization :: SQL -> Maybe SQL
+optimization (SELECT [All] [Right (SELECT n b c)] Nothing) =
+  Just $ SELECT n b c
+optimization (SELECT n [Right (SELECT [All] b c)] Nothing) =
+  Just $
+  SELECT [All] [Right $ SELECT n b c] Nothing
+optimization (SELECT n [Right (SELECT n' b (Just c))] (Just c'))
+  | n == n' = Just $ SELECT n b (Just $ c `E_AND` c')
+optimization _ = Nothing

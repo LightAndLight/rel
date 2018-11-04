@@ -1,4 +1,4 @@
-{-# language DataKinds #-}
+{-# language DataKinds, TypeFamilies, GADTs #-}
 module Example where
 
 import Data.Proxy (Proxy(..))

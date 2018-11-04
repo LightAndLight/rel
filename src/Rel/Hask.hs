@@ -20,10 +20,10 @@ check :: ProjHask a => Prop Hask a Bool -> a -> Bool
 check = go
   where
     go :: (ProjHask a, Eq b) => Prop Hask a b -> a -> b
-    go (And a b) = (&&) <$> go a <*> go b
-    go (Or a b) = (||) <$> go a <*> go b
+    go (a :&& b) = (&&) <$> go a <*> go b
+    go (a :|| b) = (||) <$> go a <*> go b
     go (Not a) = not <$> go a
-    go (Equals a b) = (==) <$> go a <*> go b
+    go (a :== b) = (==) <$> go a <*> go b
     go (Lt a b) = (<) <$> go a <*> go b
     go (Prj p) = projFun p
     go (Val a) = const a
